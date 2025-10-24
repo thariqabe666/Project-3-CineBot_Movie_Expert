@@ -4,7 +4,7 @@
 
 import streamlit as st
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import uuid
 
 # LangChain imports for LLM, Tools, and Agent
@@ -39,7 +39,7 @@ try:
     # Langfuse keys are automatically read by get_client() from secrets
     print("Environment variables loaded from Streamlit secrets.")
 except KeyError:
-    load_dotenv()
+    # load_dotenv()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     QDRANT_URL = os.getenv("QDRANT_URL")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
