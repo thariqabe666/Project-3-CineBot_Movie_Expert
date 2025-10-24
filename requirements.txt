@@ -3,7 +3,10 @@ streamlit
 langchain
 langchain-openai
 langchain-qdrant
+langchain-community
 qdrant-client
 pandas
 SQLAlchemy
 langfuse
+os
+uuid
