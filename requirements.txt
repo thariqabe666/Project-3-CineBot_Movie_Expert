@@ -1,0 +1,9 @@
+python-dotenv
+streamlit
+langchain
+langchain-openai
+langchain-qdrant
+qdrant-client
+pandas
+SQLAlchemy
+langfuse
