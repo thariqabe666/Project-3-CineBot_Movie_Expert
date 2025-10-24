@@ -285,6 +285,10 @@ agent_runnable = create_agent(
 # 4.1: UI Sidebar
 # - Informasi aplikasi, pembuat, link GitHub, tombol untuk menghapus riwayat obrolan.
 # - Catatan: ketika hapus riwayat, set st.session_state.messages = [] dan rerun.
+
+st.title("🎬 Movie Expert Agent 🍿")
+st.write("Tanyakan apapun padaku! Mulai dari rekomendasi film hingga data faktual film favoritmu.")
+
 with st.sidebar:
     st.title("🎬 CineBot")
     st.info("Saya adalah CineBot, agen AI pakar film yang siap membantu Anda!")
