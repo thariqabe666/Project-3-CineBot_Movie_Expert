@@ -1,40 +1,44 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import uuid  # <-- TAMBAHAN LANGFUSE (untuk session_id unik)
+import uuid
 
-# --- Import untuk LLM, Tools, dan Agent ---
+# LangChain imports for LLM, Tools, and Agent
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain_community.utilities import SQLDatabase
-# === IMPORT BARU DARI DOCS ===
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain.tools import tool
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage  # <-- SUDAH ADA (penting)
-# <-- TAMBAHAN LANGFUSE ---
+from langchain_core.messages import HumanMessage, AIMessage
+
+# Langfuse imports for tracing
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
-# -------------------------
-
 
 # === BAGIAN 1: SETUP & INISIALISASI ===
-# Muat environment variables
+st.set_page_config(
+    page_title="CineBot 🎬",
+    page_icon="🍿",
+    layout="wide" # Mengubah layout menjadi 'wide'
+)
+
+# Load environment variables from Streamlit secrets or .env file
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     QDRANT_URL = st.secrets["QDRANT_URL"]
     QDRANT_API_KEY = st.secrets["QDRANT_API_KEY"]
-# (Keys Langfuse akan dibaca otomatis oleh get_client() dari secrets)
-    print("Loaded keys from Streamlit secrets.")
+    # Langfuse keys are automatically read by get_client() from secrets
+    print("Environment variables loaded from Streamlit secrets.")
 except KeyError:
     load_dotenv()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     QDRANT_URL = os.getenv("QDRANT_URL")
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-# (Keys Langfuse akan dibaca otomatis oleh get_client() dari .env)
-    print("Loaded keys from .env file.")
+    # Langfuse keys are automatically read by get_client() from .env
+    print("Environment variables loaded from .env file.")
 
-# <-- MODIFIKASI LANGFUSE v3: Inisialisasi klien global ---
+# Initialize Langfuse client globally for tracing
 # Ini akan membaca LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, dll.
 # dari environment (secrets/dotenv) secara otomatis.
 try:
@@ -42,7 +46,6 @@ try:
 except Exception as e:
     print(f"Peringatan: Gagal menginisialisasi Langfuse. Tracing mungkin tidak aktif. Error: {e}")
     langfuse = None
-# -----------------------------------------------------
 
 # Inisialisasi model LLM dan Embedding
 llm = ChatOpenAI(
@@ -56,9 +59,28 @@ embeddings = OpenAIEmbeddings(
     api_key=OPENAI_API_KEY
 )
 
-# Tentukan konstanta
+# Define constants for Qdrant and SQL database
 QDRANT_COLLECTION_NAME = "imdb_movies"
 SQL_DB_URI = "sqlite:///movies.db"
+
+# === SIDEBAR UI ===
+with st.sidebar:
+    st.title("🎬 CineBot")
+    st.info("Saya adalah CineBot, agen AI pakar film yang siap membantu Anda!")
+    
+    st.markdown("---")
+    st.markdown("### Dibuat oleh:")
+    st.markdown("**Thariq Ahmad Baihaqi Adinegara**")
+    st.markdown("Purwadhika Digital Technology School - AI Engineering")
+    st.markdown("_Data diambil dari IMDb Top 1000 Movies_")
+    
+    # GitHub repository link
+    st.markdown("[Lihat Kode di GitHub](https://github.com/thariqabe666/Project-3-CineBot_Movie_Expert)")
+    st.markdown("---")
+    # Chat history clear button
+    if st.button("Hapus Riwayat Obrolan", use_container_width=True, type="primary"):
+        st.session_state.messages = []
+        st.rerun() # Refresh halaman agar chat kosong
 
 
 # === BAGIAN 2: DEFINISI TOOLS ===
@@ -71,7 +93,7 @@ def get_movie_recommendations(question: str) -> str:
     Input harus berupa pertanyaan dalam bahasa natural tentang film yang dicari.
     Contoh: 'Cari film tentang perjalanan waktu' atau 'Rekomendasi film mirip The Dark Knight'.
     """
-    print(f"\n>> MENGGUNAKAN TOOL RAG: {question}")
+    print(f"\n>> Using RAG Tool for movie recommendations: '{question}'")
     qdrant_store = QdrantVectorStore.from_existing_collection(
         embedding=embeddings,
         collection_name=QDRANT_COLLECTION_NAME,
@@ -92,7 +114,7 @@ def get_movie_recommendations(question: str) -> str:
     )
     return f"Berikut adalah 3 film yang paling relevan berdasarkan pencarianmu:\n{formatted_results}"
 
-# === FUNGSI TOOL SQL YANG DIMODIFIKASI SESUAI DOCS BARU ===
+# === SQL TOOL FUNCTION ===
 @tool
 def get_factual_movie_data(question: str) -> str:
     """
@@ -100,15 +122,15 @@ def get_factual_movie_data(question: str) -> str:
     seperti rating, tahun rilis, sutradara, pendapatan (gross), jumlah vote, dan durasi. 
     Sangat baik untuk pertanyaan yang melibatkan angka, statistik, perbandingan, atau daftar.
     Contoh: 'top 5 film rating tertinggi 2019', 'rata-rata pendapatan film Christopher Nolan', 'total film di atas 150 menit'.
-    """
-    print(f"\n>> MENGGUNAKAN TOOL SQL (Metode Toolkit Manual): {question}")
+    """ 
+    print(f"\n>> Using SQL Tool for factual movie data: '{question}'")
     
     db = SQLDatabase.from_uri(SQL_DB_URI)
     
-    # 1. Buat toolkit
+    # 1. Create SQL toolkit
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
     
-    # 2. Dapatkan daftar tools-nya
+    # 2. Get the tools from the toolkit
     sql_tools = toolkit.get_tools()
 
     # 3. Buat system prompt khusus untuk SQL
@@ -143,7 +165,7 @@ def get_factual_movie_data(question: str) -> str:
         top_k=5,
     )
 
-    # 4. Buat "sub-agent" khusus SQL
+    # 4. Create a dedicated "sub-agent" for SQL queries
     sql_agent_runnable = create_agent(
         llm,
         sql_tools,
@@ -151,32 +173,26 @@ def get_factual_movie_data(question: str) -> str:
     )
     
     try:
-        # 5. Jalankan sub-agent SQL
+        # 5. Invoke the SQL sub-agent
         response_state = sql_agent_runnable.invoke({
             "messages": [{"role": "user", "content": question}]
         })
         
-        # === TAMBAHAN BARU: EKSTRAK JAWABAN & QUERY ===
-        
-        # 6. Ekstrak jawaban AKHIR dari pesan terakhir
+        # 6. Extract the final answer from the last message
         answer = response_state["messages"][-1].content
         
-        # 7. Ekstrak SQL Query dari intermediate steps (history pesan si sub-agent)
+        # 7. Extract the SQL Query from intermediate steps (sub-agent's message history)
         sql_query = "Tidak ada query SQL yang dieksekusi (jawaban langsung)."
-        # Iterasi mundur untuk menemukan tool call terakhir ke 'sql_db_query'
-        # --- PERBAIKAN: Tambahkan `isinstance` untuk mencegah error ---
         for msg in reversed(response_state["messages"]):
             if isinstance(msg, AIMessage) and msg.tool_calls:
                 for call in msg.tool_calls:
                     if call['name'] == 'sql_db_query':
                         sql_query = call['args'].get('query', 'Query tidak ditemukan')
-                        break  # Menemukan query, hentikan loop 'for call'
-                if "query tidak ditemukan" not in sql_query and "Tidak ada query" not in sql_query:
-                    break # Hentikan iterasi
+                        break # Found the query, stop inner loop
+                if sql_query != "Tidak ada query SQL yang dieksekusi (jawasan langsung).": # If query was found, stop outer loop
+                    break
             
-        # 8. Gabungkan dengan delimiter unik "||SQL_QUERY||"
-        # Ini adalah "trik" agar kita bisa mengirim DUA informasi (jawaban dan query)
-        # kembali ke agent utama sebagai SATU string.
+        # 8. Combine answer and SQL query using a unique delimiter for main agent parsing
         return f"{answer}||SQL_QUERY||{sql_query}"
         
     except Exception as e:
@@ -184,9 +200,8 @@ def get_factual_movie_data(question: str) -> str:
         return f"Terjadi error saat menjalankan query: {e}.||SQL_QUERY||"  
 
 
-# Daftarkan semua tools yang dimiliki agent
+# Register all tools available to the agent
 tools = [get_movie_recommendations, get_factual_movie_data]
-
 
 # === BAGIAN 3: MERAKIT AGENT UTAMA ===
 
@@ -240,24 +255,22 @@ When your answer comes from a tool (RAG or SQL):
 * **Contoh:** "Eh, aku baru sadar nih... kamu kayaknya ngefans berat sama filmnya Christopher Nolan ya? Dua film tadi kan karya dia. Mau aku buatin daftar lengkap film-film dia yang lain?"
 """
 
-# 2. Buat Agent (Cara Baru yang Jauh Lebih Simpel)
+# 2. Create the main agent
 agent_runnable = create_agent(
     llm,
     tools,
     system_prompt=SYSTEM_PROMPT
 )
 
-
 # === BAGIAN 4: STREAMLIT UI (VERSI BARU DENGAN FIX hasattr) ===
-st.title("🎬 CineBot: Movie Expert Agent 🍿")
-st.write("Tanyakan apapun padaku! (Rekomendasi film atau data faktual)")
+st.title("🎬 Movie Expert Agent 🍿")
+st.write("Tanyakan apapun padaku! Mulai dari rekomendasi film hingga data faktual film favoritmu.")
 
 # <-- TAMBAHAN LANGFUSE: Buat session_id unik per sesi Streamlit ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
-# -----------------------------------------------------------------
 
-# --- TAMBAHAN: Tombol Contoh Pertanyaan ---
+# Example question buttons
 def set_user_input(question):
     """Callback function to set user input from a button."""
     st.session_state.user_input = question
@@ -271,17 +284,24 @@ with cols[1]:
 with cols[2]:
     st.button("Rekomendasi film Nolan", on_click=set_user_input, args=("Kasih tau daftar film dari Christopher Nolan",), use_container_width=True)
 
-# Ambil input dari chat box atau dari state yang di-set oleh tombol
+# Get user input from chat box or example buttons
 chat_input = st.chat_input("Contoh: 'Film mirip Inception' atau 'Top 5 film 2010'")
 user_input = chat_input or st.session_state.get("user_input", None)
 
-# Hapus state setelah digunakan agar tidak ter-trigger lagi
+# Clear button-triggered input after use
 if "user_input" in st.session_state and not chat_input:
     del st.session_state.user_input
-# --- AKHIR TAMBAHAN ---
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+    # --- TAMBAHAN: Salam Pembuka Otomatis ---
+    # Tambahkan pesan pertama dari asisten jika history kosong
+    if not st.session_state.messages:
+        st.session_state.messages.append(
+            {"role": "assistant", "content": "Halo! Aku CineBot 🍿 Ada yang bisa kubantu? Kamu bisa tanya rekomendasi film atau data film spesifik!"}
+        )
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -292,8 +312,7 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # --- PERBAIKAN 1: Konversi history dari dict ke objek LangChain ---
-    # Agent runnable mengharapkan list of BaseMessage (HumanMessage, AIMessage), bukan dict.
+    # Convert chat history from dicts to LangChain BaseMessage objects
     from langchain_core.messages import HumanMessage, AIMessage
     langchain_messages = [
         HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"])
@@ -310,11 +329,10 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("CineBot sedang mencari jawaban..."):
             
-            # <-- MODIFIKASI LANGFUSE v3: Inisialisasi dan Config ---
-            # 1. Inisialisasi handler KOSONG (sesuai docs baru)
+            # Initialize Langfuse callback handler
             langfuse_handler = CallbackHandler()
             
-# <-- PERUBAHAN LANGFUSE v3: Buat Config dengan Metadata ---
+            # Configure Langfuse tracing with metadata
             config = {
                 "callbacks": [langfuse_handler],
                 "run_name": f"Query: {user_input[:30]}...",
@@ -323,36 +341,30 @@ if user_input:
                     "langfuse_user_id": st.session_state.session_id, 
                     "langfuse_tags": ["CineBot-v1", "Capstone-Mod3"]
                 }
-            }
-            # -----------------------------------------------
+            }            
             
-            # 1. Gunakan .stream() DENGAN config
+            # Stream agent response with Langfuse configuration
             stream = agent_runnable.stream(
                 {"messages": langchain_messages},
                 stream_mode="values",
-                config=config  # <-- TAMBAHAN LANGFUSE
+                config=config
             )
             
             for chunk in stream:
                 if "messages" in chunk:
                     last_valid_state = chunk 
-                    
                     last_message = chunk["messages"][-1]
                     
-                    # === INI ADALAH PERBAIKANNYA ===
-                    # 3. Tangkap momen agent MEMUTUSKAN memanggil tool (dengan aman)
-                    #    Kita cek dulu apakah atribut 'tool_calls' ada
+                    # Capture tool call information when the agent decides to use a tool
                     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                         call = last_message.tool_calls[0]
                         tool_call_info = {
                             "name": call['name'],
                             "args": call['args']
                         }
-                    # === AKHIR PERBAIKAN ===
-                    
-                    # --- PERBAIKAN 2: Gunakan .type bukan .role ---
-                    # Objek pesan LangChain memiliki atribut .type ('human', 'ai', 'tool')
-                    if hasattr(last_message, "type") and last_message.type == "tool":
+                        
+                    # Capture raw tool output if the message type is 'tool'
+                    if hasattr(last_message, "type") and last_message.type == "tool": # LangChain message objects have a .type attribute
                         full_tool_output = last_message.content
             
             # 5. Ambil jawaban akhir (setelah stream selesai)
@@ -361,52 +373,20 @@ if user_input:
                 display_answer = final_answer_object.content
             else:
                 display_answer = "Maaf, terjadi kesalahan."
-
-            # 6. Logika Parsing untuk SQL
+            
+            # 6. Parse SQL query from tool output if SQL tool was used
             if tool_call_info and tool_call_info['name'] == 'get_factual_movie_data':
                 if "||SQL_QUERY||" in full_tool_output:
                     parts = full_tool_output.split("||SQL_QUERY||")
                     sql_query_to_display = parts[1]
                 else:
                     sql_query_to_display = "Query tidak dapat diekstrak dari tool."
-
-            # Tampilkan jawaban bersih di chat
-            # --- MODIFIKASI DIMULAI DARI SINI ---
             
-            # Cek apakah jawaban mengandung tag poster
-            if "||POSTER||" in display_answer:
-                # Pisahkan jawaban berdasarkan tag
-                parts = display_answer.split("||POSTER||")
-                
-                # Tampilkan bagian pertama (teks sebelum poster pertama)
-                st.markdown(parts[0])
-                
-                # Loop untuk sisa bagian (yang berisi URL poster dan teks setelahnya)
-                for part in parts[1:]:
-                    # Pisahkan URL dari sisa teks
-                    # (Asumsi: URL adalah hal pertama setelah tag)
-                    try:
-                        # Split di baris baru pertama
-                        url_part, *text_part = part.split('\n', 1) 
-                        poster_url = url_part.strip()
-                        
-                        # Tampilkan gambar jika URL-nya valid
-                        if poster_url.startswith("http"):
-                            st.image(poster_url)
-                        else:
-                            st.markdown(f"*(Poster tidak tersedia: {poster_url})*")
-                        
-                        # Tampilkan sisa teks setelah poster
-                        if text_part:
-                            st.markdown(text_part[0])
-                            
-                    except ValueError:
-                        # Jika ada bagian yang aneh, tampilkan saja sebagai teks
-                        st.markdown(part)
-            else:
-                # Jika tidak ada tag poster, tampilkan seperti biasa
-                st.markdown(display_answer)
-            # --- MODIFIKASI SELESAI ---
+            # Display the final answer from the agent.
+            # The agent is instructed to format posters as Markdown images within a table.
+            # unsafe_allow_html=True is used for robustness in case the agent generates
+            # complex markdown or HTML elements.
+            st.markdown(display_answer, unsafe_allow_html=True)
 
 
     # --- Tampilkan Expander DI LUAR `chat_message` ---
