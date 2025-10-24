@@ -1,0 +1,15 @@
+# Virtual Environment
+.venv/
+
+# File environment
+.env
+
+# File database 
+*.db
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# File rahasia Streamlit 
+.streamlit/secrets.toml
