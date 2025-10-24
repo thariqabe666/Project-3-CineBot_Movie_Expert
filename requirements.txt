@@ -4,3 +4,4 @@ langchain-qdrant
 langchain-community
 qdrant-client
 sqlalchemy
+langfuse
