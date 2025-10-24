@@ -1,3 +1,7 @@
+# === BAGIAN 1: SETUP & INISIALISASI ===
+# 1.1: Imports & Requirements
+# - Semua import yang diperlukan untuk Streamlit, LangChain, Qdrant, Langfuse, dotenv, dll.
+
 import streamlit as st
 import os
 from dotenv import load_dotenv
@@ -16,14 +20,18 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
 
-# === BAGIAN 1: SETUP & INISIALISASI ===
+# 1.2: Streamlit page configuration
+# - Atur judul, ikon, dan layout halaman
 st.set_page_config(
     page_title="CineBot 🎬",
     page_icon="🍿",
     layout="wide" # Mengubah layout menjadi 'wide'
 )
 
-# Load environment variables from Streamlit secrets or .env file
+# 1.3: Environment variables loading (secrets atau .env)
+# - Prioritas: Streamlit secrets -> .env
+# - Variabel yang digunakan: OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY
+# - Tujuan: memudahkan deployment (Streamlit Cloud) dan lokal (.env)
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     QDRANT_URL = st.secrets["QDRANT_URL"]
@@ -38,6 +46,9 @@ except KeyError:
     # Langfuse keys are automatically read by get_client() from .env
     print("Environment variables loaded from .env file.")
 
+# 1.4: Langfuse client initialization (opsional)
+# - Inisialisasi tracing client jika tersedia.
+# - Jika gagal, tampilkan peringatan tetapi jalankan aplikasi tanpa tracing.
 # Initialize Langfuse client globally for tracing
 # Ini akan membaca LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, dll.
 # dari environment (secrets/dotenv) secara otomatis.
@@ -47,6 +58,9 @@ except Exception as e:
     print(f"Peringatan: Gagal menginisialisasi Langfuse. Tracing mungkin tidak aktif. Error: {e}")
     langfuse = None
 
+# 1.5: LLM & Embedding initialization
+# - Konfigurasi model LLM (ChatOpenAI) dan embeddings (OpenAIEmbeddings).
+# - Gunakan API key dari environment.
 # Inisialisasi model LLM dan Embedding
 llm = ChatOpenAI(
     model="gpt-4o-mini",
@@ -59,32 +73,21 @@ embeddings = OpenAIEmbeddings(
     api_key=OPENAI_API_KEY
 )
 
+# 1.6: Konstanta aplikasi
+# - Nama koleksi Qdrant dan URI database SQLite disimpan di sini.
 # Define constants for Qdrant and SQL database
 QDRANT_COLLECTION_NAME = "imdb_movies"
 SQL_DB_URI = "sqlite:///movies.db"
 
-# === SIDEBAR UI ===
-with st.sidebar:
-    st.title("🎬 CineBot")
-    st.info("Saya adalah CineBot, agen AI pakar film yang siap membantu Anda!")
-    
-    st.markdown("---")
-    st.markdown("### Dibuat oleh:")
-    st.markdown("**Thariq Ahmad Baihaqi Adinegara**")
-    st.markdown("Purwadhika Digital Technology School - AI Engineering")
-    st.markdown("_Data diambil dari IMDb Top 1000 Movies_")
-    
-    # GitHub repository link
-    st.markdown("[Lihat Kode di GitHub](https://github.com/thariqabe666/Project-3-CineBot_Movie_Expert)")
-    st.markdown("---")
-    # Chat history clear button
-    if st.button("Hapus Riwayat Obrolan", use_container_width=True, type="primary"):
-        st.session_state.messages = []
-        st.rerun() # Refresh halaman agar chat kosong
-
-
 # === BAGIAN 2: DEFINISI TOOLS ===
+# 2.1: Overview
+# - Tool adalah fungsi yang dipakai agent untuk mengambil data.
+# - Di aplikasi ini ada dua tool: RAG (Qdrant) untuk rekomendasi kualitatif dan SQL untuk data faktual.
 
+# 2.2: Tool RAG — get_movie_recommendations
+# - Tujuan: cari film berdasarkan tema/plot/kemiripan (kualitatif).
+# - Input: pertanyaan natural language.
+# - Output: string terformat dengan metadata film, termasuk tag khusus poster `||POSTER||URL`.
 @tool
 def get_movie_recommendations(question: str) -> str:
     """
@@ -114,7 +117,15 @@ def get_movie_recommendations(question: str) -> str:
     )
     return f"Berikut adalah 3 film yang paling relevan berdasarkan pencarianmu:\n{formatted_results}"
 
-# === SQL TOOL FUNCTION ===
+# 2.3: Tool SQL — get_factual_movie_data
+# - Tujuan: jawab pertanyaan faktual/kuantitatif (rating, tahun, sutradara, dsb.)
+# - Pendekatan:
+#   1) Buat koneksi SQLDatabase
+#   2) Inisialisasi SQLDatabaseToolkit dan ambil tools SQL
+#   3) Definisikan system prompt khusus SQL (guidelines untuk pembuatan query, pembatasan, dan instruksi Poster)
+#   4) Buat sub-agent khusus untuk menjalankan langkah pembuatan query dan eksekusi
+#   5) Jalankan sub-agent, ambil jawaban akhir dan, jika ada, query SQL yang dieksekusi
+# - Output: gabungan jawaban dan delimiter `||SQL_QUERY||` diikuti SQL query (atau pesan error + delimiter).
 @tool
 def get_factual_movie_data(question: str) -> str:
     """
@@ -200,12 +211,18 @@ def get_factual_movie_data(question: str) -> str:
         return f"Terjadi error saat menjalankan query: {e}.||SQL_QUERY||"  
 
 
-# Register all tools available to the agent
+# 2.4: Daftar tool yang diregistrasi ke agent utama
 tools = [get_movie_recommendations, get_factual_movie_data]
 
 # === BAGIAN 3: MERAKIT AGENT UTAMA ===
-
-# 1. Definisikan System Prompt untuk Agent Utama
+# 3.1: System prompt utama (PERSONALITAS + ATURAN PENTING)
+# - Menetapkan persona CineBot (ramah, witty, informatif) dan aturan ketat penggunaan tool.
+# - Penekanan pada:
+#   * Pilih hanya SATU tool per pertanyaan
+#   * Perbedaan kapan pakai RAG vs SQL
+#   * Format jawaban: wajib tabel Markdown, kolom Poster harus berisi sintaks gambar Markdown atau "N/A"
+#   * Instruksi follow-up cerdas dan aturan history
+# - System prompt ini sangat menentukan perilaku agent.
 SYSTEM_PROMPT = """
 You are CineBot, an enthusiastic, witty, and super helpful movie expert.
 Your personality is like a close friend who is a total movie buff. Use varied, friendly, engaging language, and casual slang (e.g., "wah", "keren", "epik", "bikin mikir", "wajib tonton", "nendang", "spill dong").
@@ -255,21 +272,41 @@ When your answer comes from a tool (RAG or SQL):
 * **Contoh:** "Eh, aku baru sadar nih... kamu kayaknya ngefans berat sama filmnya Christopher Nolan ya? Dua film tadi kan karya dia. Mau aku buatin daftar lengkap film-film dia yang lain?"
 """
 
-# 2. Create the main agent
+# 3.2: Buat agent utama (runnable)
+# - Gunakan create_agent dengan llm, tools, dan system_prompt di atas.
+# - Hasil: agent_runnable yang dapat dipanggil / di-stream.
 agent_runnable = create_agent(
     llm,
     tools,
     system_prompt=SYSTEM_PROMPT
 )
 
-# === BAGIAN 4: STREAMLIT UI (VERSI BARU DENGAN FIX hasattr) ===
-st.title("🎬 Movie Expert Agent 🍿")
-st.write("Tanyakan apapun padaku! Mulai dari rekomendasi film hingga data faktual film favoritmu.")
+# === BAGIAN 4: STREAMLIT UI & FLOW INTERAKSI ===
+# 4.1: UI Sidebar
+# - Informasi aplikasi, pembuat, link GitHub, tombol untuk menghapus riwayat obrolan.
+# - Catatan: ketika hapus riwayat, set st.session_state.messages = [] dan rerun.
+with st.sidebar:
+    st.title("🎬 CineBot")
+    st.info("Saya adalah CineBot, agen AI pakar film yang siap membantu Anda!")
+    
+    st.markdown("---")
+    st.markdown("### Dibuat oleh:")
+    st.markdown("**Thariq Ahmad Baihaqi Adinegara**")
+    st.markdown("Purwadhika Digital Technology School - AI Engineering")
+    st.markdown("_Data diambil dari IMDb Top 1000 Movies_")
+    
+    # GitHub repository link
+    st.markdown("[Lihat Kode di GitHub](https://github.com/thariqabe666/Project-3-CineBot_Movie_Expert)")
+    st.markdown("---")
+    # Chat history clear button
+    if st.button("Hapus Riwayat Obrolan", use_container_width=True, type="primary"):
+        st.session_state.messages = []
+        st.rerun() # Refresh halaman agar chat kosong
 
-# <-- TAMBAHAN LANGFUSE: Buat session_id unik per sesi Streamlit ---
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
 
+# 4.2: Contoh pertanyaan & callback
+# - Tombol contoh untuk mempermudah pengguna memulai (mis. Film mirip Inception, Top 5 gross, dsb.)
+# - Fungsi set_user_input sebagai callback untuk menaruh nilai ke st.session_state.user_input.
 # Example question buttons
 def set_user_input(question):
     """Callback function to set user input from a button."""
@@ -284,6 +321,15 @@ with cols[1]:
 with cols[2]:
     st.button("Rekomendasi film Nolan", on_click=set_user_input, args=("Kasih tau daftar film dari Christopher Nolan",), use_container_width=True)
 
+# 4.3: Session management & chat history
+# - Inisialisasi session_id unik (untuk Langfuse dan tracking sesi).
+# - Inisialisasi st.session_state.messages jika belum ada.
+# - Tambahkan salam pembuka otomatis bila history kosong.
+
+# Inisialisasi session_id unik untuk Langfuse tracing
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 # Get user input from chat box or example buttons
 chat_input = st.chat_input("Contoh: 'Film mirip Inception' atau 'Top 5 film 2010'")
 user_input = chat_input or st.session_state.get("user_input", None)
@@ -291,7 +337,6 @@ user_input = chat_input or st.session_state.get("user_input", None)
 # Clear button-triggered input after use
 if "user_input" in st.session_state and not chat_input:
     del st.session_state.user_input
-
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -312,14 +357,14 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Convert chat history from dicts to LangChain BaseMessage objects
+    # 1. Convert chat history from dicts to LangChain BaseMessage objects
     from langchain_core.messages import HumanMessage, AIMessage
     langchain_messages = [
         HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"])
         for msg in st.session_state.messages
     ]
 
-    # Variabel untuk menyimpan info proses berpikir
+    # 2. Variabel untuk menyimpan info proses berpikir
     tool_call_info = None
     full_tool_output = ""
     sql_query_to_display = None
@@ -332,7 +377,7 @@ if user_input:
             # Initialize Langfuse callback handler
             langfuse_handler = CallbackHandler()
             
-            # Configure Langfuse tracing with metadata
+            # 3. Configure Langfuse tracing with metadata
             config = {
                 "callbacks": [langfuse_handler],
                 "run_name": f"Query: {user_input[:30]}...",
@@ -343,7 +388,7 @@ if user_input:
                 }
             }            
             
-            # Stream agent response with Langfuse configuration
+            # 4. Stream agent response with Langfuse configuration
             stream = agent_runnable.stream(
                 {"messages": langchain_messages},
                 stream_mode="values",
