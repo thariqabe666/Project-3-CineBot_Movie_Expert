@@ -4,7 +4,7 @@
 
 CineBot adalah agen AI percakapan yang dirancang untuk menjadi teman diskusi film Anda. Dibangun menggunakan Python, Streamlit, dan LangChain, CineBot mampu menjawab berbagai pertanyaan seputar film, mulai dari rekomendasi berdasarkan *mood* atau kemiripan hingga data faktual yang spesifik.
 
-[![Streamlit App]([https://static.streamlit.io/badges/streamlit_badge_black_white.svg](https://cinebot-movie-expert-agent.streamlit.app/)](URL_STREAMLIT_APP_ANDA_DISINI) 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cinebot-movie-expert-agent.streamlit.app/) 
 
 ---
 
