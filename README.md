@@ -7,6 +7,13 @@ CineBot is your **24/7 movie buddy**—a conversational AI that answers ANY film
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://cinebot-movie-expert-agent.streamlit.app/)
 
 ---
+## ⏭️ Quick Demo
+
+![2025-11-1423-16-11-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/a6093121-6289-4ef8-bc16-122e22e127fe)
+
+
+
+---
 ## ✨ Superpowers
 - **Smart Multi-Tool Brain**  
   CineBot picks the **perfect tool** on the fly:
@@ -107,3 +114,5 @@ AI Engineering Student – Purwadhika Digital Technology School
 
 Lights, camera, **chat**! 🎥  
 Ask CineBot anything—“Funniest 80s comedy with zero explosions?”—and watch the magic.
+
+
